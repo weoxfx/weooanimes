@@ -323,7 +323,7 @@ footer{background:var(--bg2);border-top:1px solid var(--border);padding:48px 64p
           <div id="loading-label" style="font-size:13px;color:#6b7e94;">Finding stream...</div>
         </div>
         <video id="real-video" style="width:100%;height:100%;display:none;background:#000;" controls preload="metadata"></video>
-        <iframe id="stream-iframe" style="width:100%;height:100%;border:none;display:none;" allowfullscreen allow="fullscreen;autoplay;encrypted-media" referrerpolicy="no-referrer"></iframe>
+        <iframe id="stream-iframe" style="width:100%;height:100%;border:none;display:none;min-height:300px;" allowfullscreen allow="fullscreen;autoplay;encrypted-media;picture-in-picture" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"></iframe>
         <div id="no-stream" style="position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:linear-gradient(135deg,#0a0a14,#080b11);">
           <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#1e2a38" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
           <div style="text-align:center;">
@@ -378,7 +378,7 @@ const JIKAN = 'https://api.jikan.moe/v4';
 // Local dev:  http://localhost:3000
 // Railway:    https://your-app.up.railway.app
 // Render:     https://your-app.onrender.com
-const PROXY_BASE = 'https://62fbe129-9ba9-4894-98ca-52bd3cbc4710-00-20idphocd0u6j.sisko.replit.dev';
+const PROXY_BASE = 'https://homely-better-slope--weac5.replit.app';
 
 // ═══════════════════════════════════════════════════════
 // SUPABASE
@@ -1005,9 +1005,22 @@ function streamTrackProgress() {
 // HLS loader
 async function streamLoadHLS(m3u8url, fallbackSources, downloadUrl) {
   const v = document.getElementById('real-video');
-  // Safari native HLS
+
+  // iOS Safari — native HLS but our proxy URLs need special handling
+  // Use a blob URL trick to feed the m3u8 to native player
   if (v.canPlayType('application/vnd.apple.mpegurl')) {
-    streamShowVideo(m3u8url, 'HLS');
+    // On iOS, fetch the proxied m3u8 and create a blob URL
+    // This makes iOS native HLS treat it as a local resource
+    try {
+      const resp = await fetch(m3u8url);
+      const text = await resp.text();
+      const blob = new Blob([text], { type: 'application/vnd.apple.mpegurl' });
+      const blobUrl = URL.createObjectURL(blob);
+      streamShowVideo(blobUrl, 'HLS');
+    } catch(e) {
+      // Fallback — try direct
+      streamShowVideo(m3u8url, 'HLS');
+    }
     if (downloadUrl) streamSetDownload(downloadUrl);
     return;
   }
@@ -1055,9 +1068,24 @@ function destroyHLS() {
 }
 
 // ─── Proxy result handler ──────────────────────────────────────
+// Detect iOS — use iframe player instead of native video
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
 async function handleProxyResult(data, ep) {
   if (!data) throw new Error('No response from proxy');
   if (data.error) throw new Error(data.error);
+
+  // Always use embed on iOS — native HLS from 3rd party CDNs is blocked
+  if (isIOS) {
+    const malId = currentAnime?.mal_id;
+    if (malId) {
+      streamShowIframe(`https://www.miruro.tv/watch?id=${malId}&ep=${ep}`);
+      if (currentAnime) saveProgress(malId, ep, 0);
+      showToast('Streaming via Miruro');
+      return;
+    }
+  }
+
   if (data.isEmbed && data.embedUrl) {
     streamShowIframe(data.embedUrl);
     if (currentAnime) saveProgress(currentAnime.mal_id, ep, 0);
